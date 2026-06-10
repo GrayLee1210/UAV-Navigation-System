@@ -1,7 +1,7 @@
 # 无人机平台
 
-> **Current Status:** 🚧 Hardware Construction & Architecture Design  
-> **Latest Version:** v1.1.0 (Planning)
+> **Current Status:** ✅ v1.1.0 Completed — LiDAR-Inertial Localization & Waypoint Navigation Verified  
+> **Latest Version:** v1.1.0
 
 ## 📖 Introduction
 This repository documents the iterative development of a custom **250mm wheelbase quadrotor** designed for advanced autonomous navigation and control research. 
@@ -34,12 +34,21 @@ The drone is built on a custom 250mm carbon fiber frame, featuring a high-perfor
 * **Planning:** [EGO-Planner](https://github.com/ZJU-FAST-Lab/ego-planner)
 * **Key Hardware:** Jetson NX + D435
 
-### 🚀 v1.1.0: Lidar-Inertial Upgrade (Current Target)
+### ✅ v1.1.0: Lidar-Inertial Upgrade (Completed)
 **Focus:** Integrating Livox Mid-360 for robust, high-precision localization in complex environments.
-* **Localization:** [Fast-LIVO2](https://github.com/hku-mars/FAST-LIVO) (LiDAR-Inertial-Visual Odometry)
-* **Planning:** [EGO-Planner](https://github.com/ZJU-FAST-Lab/ego-planner)
-* **Key Hardware:** Jetson NX + Mid360 + D435
-* *Note: This version aims to leverage the wide FOV of Mid-360 for better obstacle avoidance.*
+* **Localization:** [FAST-LIO2](https://github.com/hku-mars/FAST_LIO) / [DLIO](https://github.com/vectr-ucla/direct_lidar_inertial_odometry) (LiDAR-Inertial Odometry) with Livox Mid-360
+* **Planning:** [EGO-Planner](https://github.com/ZJU-FAST-Lab/ego-planner) for waypoint (fixed-point) navigation
+* **Key Hardware:** Jetson NX + Mid-360 + D435
+* **Result:** Stable indoor localization (hover) and autonomous waypoint navigation verified on the real platform.
+* 🎬 **Demo Videos:**
+  * [FASTLIO2.mp4](./FASTLIO2.mp4) — Stable hover with FAST-LIO2 localization
+  * [DLIO+egoplanner.mp4](./DLIO+egoplanner.mp4) — Autonomous waypoint navigation with DLIO + EGO-Planner
+
+### 🚀 v1.2.0: Autonomous Exploration & Agility (Next Target)
+**Focus:** From waypoint navigation to fully autonomous exploration with a lighter, faster platform.
+* **Autonomous Exploration:** Frontier/sampling-based exploration in unknown environments.
+* **Higher Flight Speed:** Push planning and control toward more aggressive, faster flight.
+* **Mechanical Optimization:** Redesign mounts and structure to reduce airframe weight.
 
 ### 🔮 Future Goals: Intelligent Control
 **Focus:** Advanced research driven by Deep Reinforcement Learning.
@@ -50,5 +59,7 @@ The drone is built on a custom 250mm carbon fiber frame, featuring a high-perfor
 ## 📂 Repository Structure
 ```text
 .
-├── BOM.xlsx             # Detailed Hardware Bill of Materials
-└── README.md           # This file
+├── BOM.xlsx                    # Detailed Hardware Bill of Materials
+├── FASTLIO2.mp4                # v1.1.0 demo: stable hover with FAST-LIO2 localization
+├── DLIO+egoplanner.mp4         # v1.1.0 demo: DLIO + EGO-Planner waypoint navigation
+└── README.md                   # This file
