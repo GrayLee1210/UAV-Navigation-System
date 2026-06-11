@@ -1,0 +1,94 @@
+diff --git a/cfg/dlio.yaml b/cfg/dlio.yaml
+index 9cebbe2..2ca1320 100644
+--- a/cfg/dlio.yaml
++++ b/cfg/dlio.yaml
+@@ -10,6 +10,13 @@
+ #                                                         #
+ ###########################################################
+ 
++# Adapted for Livox MID360 on Jetson (jetson@172.20.10.2).
++# baselink frame is taken to be the IMU frame, so:
++#   - baselink2imu   = identity
++#   - baselink2lidar.t = LiDAR origin expressed in the IMU frame
++#       = FAST-LIO mid360.yaml extrinsic_T  [-0.011, -0.02329, 0.04412]
++# Source of truth: ~/fast_lio2_ws/src/FAST_LIO/config/mid360.yaml
++
+ dlio:
+ 
+   version: 1.1.1
+@@ -33,13 +40,12 @@ dlio:
+ 
+   extrinsics:
+     baselink2imu:
+-      t: [ 0.006253, -0.011775, 0.007645 ]
++      t: [ 0.0, 0.0, 0.0 ]
+       R: [ 1.,  0.,  0.,
+            0.,  1.,  0.,
+            0.,  0.,  1. ]
+     baselink2lidar:
+-      t: [ 0.,  0.,  0. ]
++      t: [ -0.011, -0.02329, 0.04412 ]
+       R: [ 1.,  0.,  0.,
+            0.,  1.,  0.,
+            0.,  0.,  1. ]
+-
+diff --git a/cfg/params.yaml b/cfg/params.yaml
+index 1516d4b..a86d074 100644
+--- a/cfg/params.yaml
++++ b/cfg/params.yaml
+@@ -19,7 +19,7 @@ dlio:
+     imu: imu
+ 
+   map:
+-    waitUntilMove: true
++    waitUntilMove: false
+     dense:
+       filtered: false
+     sparse:
+@@ -31,7 +31,9 @@ dlio:
+     computeTimeOffset: true
+ 
+     imu:
+-      approximateGravity: true
++      approximateGravity: false
++      # Livox MID360 reports accel in g, not m/s^2 -> rescale to m/s^2.
++      accelScale: 9.80665
+       calibration:
+         gyro: true
+         accel: true
+diff --git a/include/dlio/odom.h b/include/dlio/odom.h
+index c79ebd7..af43eac 100644
+--- a/include/dlio/odom.h
++++ b/include/dlio/odom.h
+@@ -318,6 +318,7 @@ private:
+   double imu_calib_time_;
+   int imu_buffer_size_;
+   Eigen::Matrix3f imu_accel_sm_;
++  double imu_accel_scale_;
+ 
+   int gicp_min_num_points_;
+   int gicp_k_correspondences_;
+diff --git a/src/dlio/odom.cc b/src/dlio/odom.cc
+index bceae37..7d3f7a7 100644
+--- a/src/dlio/odom.cc
++++ b/src/dlio/odom.cc
+@@ -253,6 +253,9 @@ void dlio::OdomNode::getParams() {
+   ros::param::param<bool>("~dlio/odom/imu/calibration/gyro", this->calibrate_gyro_, true);
+   ros::param::param<double>("~dlio/odom/imu/calibration/time", this->imu_calib_time_, 3.0);
+   ros::param::param<int>("~dlio/odom/imu/bufferSize", this->imu_buffer_size_, 2000);
++  // Accelerometer unit scale. Livox (e.g. MID360) reports accel in units of g,
++  // not m/s^2, so set this to 9.80665 for those sensors. Default 1.0 (already m/s^2).
++  ros::param::param<double>("~dlio/odom/imu/accelScale", this->imu_accel_scale_, 1.0);
+ 
+   std::vector<float> accel_default{0., 0., 0.}; std::vector<float> prior_accel_bias;
+   std::vector<float> gyro_default{0., 0., 0.}; std::vector<float> prior_gyro_bias;
+@@ -1400,6 +1403,9 @@ sensor_msgs::Imu::Ptr dlio::OdomNode::transformImu(const sensor_msgs::Imu::Const
+                             imu_raw->linear_acceleration.y,
+                             imu_raw->linear_acceleration.z);
+ 
++  // Convert accelerometer to m/s^2 if the sensor reports in g (e.g. Livox MID360).
++  lin_accel *= this->imu_accel_scale_;
++
+   Eigen::Vector3f lin_accel_cg = this->extrinsics.baselink2imu.R * lin_accel;
+ 
+   lin_accel_cg = lin_accel_cg

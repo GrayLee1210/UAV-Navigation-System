@@ -1,0 +1,14 @@
+<launch>
+	<arg name="odom_topic" default="/Odometry_highrate" />
+
+	<node pkg="px4ctrl" type="px4ctrl_node" name="px4ctrl" output="screen">
+        	<!-- <remap from="~odom" to="/vicon_imu_ekf_odom" /> -->
+		<!-- For FAST-LIO based flight control, use the IMU-propageted high-rate odom. Override odom_topic if you switch back to raw FAST-LIO or VINS. -->
+		<remap from="~odom" to="$(arg odom_topic)" />
+
+		<remap from="~cmd" to="/position_cmd" />
+
+        <rosparam command="load" file="$(find px4ctrl)/config/ctrl_param_fpv.yaml" />
+	</node>
+ 
+</launch>

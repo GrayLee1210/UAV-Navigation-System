@@ -1,0 +1,51 @@
+<!--
+
+  DLIO for the Fast-Drone-250 stack (Livox MID360), drop-in replacement of FAST-LIO.
+  Publishes the GLOBAL topics the stack expects:
+    ~odom     -> /Odometry_highrate   (consumed by px4ctrl; ~100 Hz)
+    ~deskewed -> /cloud_registered     (world-frame registered cloud, consumed by ego grid_map)
+  A relay (started in run_dlio_ego_px4.sh) mirrors /Odometry_highrate -> /Odometry for ego.
+
+  IMPORTANT: launch the Livox driver with xfer_format:=0 so /livox/lidar is PointCloud2.
+
+-->
+
+<launch>
+
+  <arg name="rviz" default="false"/>
+  <arg name="pointcloud_topic" default="/livox/lidar"/>
+  <arg name="imu_topic" default="/livox/imu"/>
+
+  <!-- DLIO Odometry Node (global namespace, like FAST-LIO) -->
+  <node name="dlio_odom" ns="robot" pkg="direct_lidar_inertial_odometry" type="dlio_odom_node" output="screen" clear_params="true">
+
+    <rosparam file="$(find direct_lidar_inertial_odometry)/cfg/dlio.yaml" command="load"/>
+    <rosparam file="$(find direct_lidar_inertial_odometry)/cfg/params.yaml" command="load"/>
+
+    <!-- Subscriptions -->
+    <remap from="~pointcloud" to="$(arg pointcloud_topic)"/>
+    <remap from="~imu" to="$(arg imu_topic)"/>
+
+    <!-- Publications wired into the drone stack -->
+    <remap from="~odom"     to="/Odometry_highrate"/>
+    <remap from="~deskewed" to="/cloud_registered"/>
+
+    <!-- Other DLIO outputs (kept on namespaced names, harmless) -->
+    <remap from="~pose"     to="dlio/odom_node/pose"/>
+    <remap from="~path"     to="dlio/odom_node/path"/>
+    <remap from="~kf_pose"  to="dlio/odom_node/keyframes"/>
+    <remap from="~kf_cloud" to="dlio/odom_node/pointcloud/keyframe"/>
+
+  </node>
+
+  <!-- DLIO Mapping Node (optional; not required by ego/px4) -->
+  <node name="dlio_map" ns="robot" pkg="direct_lidar_inertial_odometry" type="dlio_map_node" output="screen" clear_params="true">
+    <rosparam file="$(find direct_lidar_inertial_odometry)/cfg/dlio.yaml" command="load"/>
+    <rosparam file="$(find direct_lidar_inertial_odometry)/cfg/params.yaml" command="load"/>
+    <remap from="~keyframes" to="dlio/odom_node/pointcloud/keyframe"/>
+    <remap from="~map" to="dlio/map_node/map"/>
+  </node>
+
+  <node pkg="rviz" type="rviz" name="dlio_rviz" args="-d $(find direct_lidar_inertial_odometry)/launch/dlio_drone.rviz" if="$(arg rviz)"/>
+
+</launch>

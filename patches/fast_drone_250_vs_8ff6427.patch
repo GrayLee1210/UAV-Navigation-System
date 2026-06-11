@@ -1,0 +1,360 @@
+diff --git a/shfiles/takeoff.sh b/shfiles/takeoff.sh
+old mode 100644
+new mode 100755
+index 3d669ac..ec88b5f
+--- a/shfiles/takeoff.sh
++++ b/shfiles/takeoff.sh
+@@ -1 +1,63 @@
+-rostopic pub -1  /px4ctrl/takeoff_land quadrotor_msgs/TakeoffLand "takeoff_land_cmd: 1"
++#!/usr/bin/env bash
++###############################################################################
++# 全自动起飞脚本 (无遥控器)
++#   流程: 预检系统健康 -> 倒计时警告 -> 触发 px4ctrl
++#   px4ctrl 收到触发后会自动: 切 OFFBOARD -> 自动 arm -> 缓启动电机 -> 起飞悬停
++#   依赖 ctrl_param_fpv.yaml:  no_RC:true  enable_auto_arm:true  auto_takeoff_land.enable:true
++#   降落:  bash ~/Fast-Drone-250/shfiles/land.sh
++###############################################################################
++set -u
++
++source /opt/ros/noetic/setup.bash
++source "$HOME/Fast-Drone-250/devel/setup.bash"
++
++ODOM_TOPIC="/Odometry_highrate"   # 与 run_ctrl.launch / px4ctrl 订阅一致
++
++echo "================ 全自动起飞预检 ================"
++
++# 1) px4ctrl 节点必须在运行
++if ! rosnode list 2>/dev/null | grep -q "/px4ctrl"; then
++  echo "[takeoff] X  px4ctrl 节点未运行 -> 先启动 run_fastlio_ego_px4.sh"
++  exit 1
++fi
++echo "[takeoff] OK px4ctrl 在运行"
++
++# 2) mavros 必须已连上飞控
++echo "[takeoff] .. 等待 mavros 连接飞控 (最多 10s)"
++conn=""
++for i in $(seq 1 20); do
++  conn=$(timeout 2 rostopic echo -n1 /mavros/state/connected 2>/dev/null | head -1)
++  [ "$conn" = "True" ] && break
++  sleep 0.5
++done
++if [ "$conn" != "True" ]; then
++  echo "[takeoff] X  mavros 未连接飞控 (connected=$conn) -> 检查 /dev/ttyACM0 与飞控供电"
++  exit 1
++fi
++echo "[takeoff] OK 飞控已连接"
++
++# 3) 里程计必须在线 (否则 px4ctrl 会 'Reject AUTO_TAKEOFF. No odom!')
++echo "[takeoff] .. 检查里程计 $ODOM_TOPIC (采样 5s)"
++rate=$(timeout 5 rostopic hz "$ODOM_TOPIC" 2>/dev/null | grep -oE "average rate: [0-9.]+" | head -1 | grep -oE "[0-9.]+$")
++if [ -z "${rate:-}" ]; then
++  echo "[takeoff] X  收不到 $ODOM_TOPIC -> FAST-LIO 没在发里程计, 拒绝起飞"
++  exit 1
++fi
++echo "[takeoff] OK 里程计在线 (~${rate} Hz)"
++
++# 4) 起飞前警告倒计时
++echo ""
++echo "  !!!  无遥控器全自动起飞 — 所有人远离桨叶, 准备好断电急停  !!!"
++echo "  目标悬停高度见 ctrl_param_fpv.yaml: takeoff_height (默认 1.0m)"
++for s in 5 4 3 2 1; do
++  echo "  起飞倒计时  $s ..."
++  sleep 1
++done
++
++# 5) 触发 px4ctrl 自动起飞 (它内部自动 OFFBOARD + 自动 arm + 缓启动)
++echo "[takeoff] >>> 发送起飞指令 <<<"
++rostopic pub -1 /px4ctrl/takeoff_land quadrotor_msgs/TakeoffLand "takeoff_land_cmd: 1"
++
++echo ""
++echo "[takeoff] 已触发. 若被拒绝, 看 px4ctrl 终端的 'Reject AUTO_TAKEOFF...' 原因."
++echo "[takeoff] 降落: bash ~/Fast-Drone-250/shfiles/land.sh"
+diff --git a/src/planner/plan_manage/launch/advanced_param_exp.xml b/src/planner/plan_manage/launch/advanced_param_exp.xml
+index d55cfd5..bd45bbf 100644
+--- a/src/planner/plan_manage/launch/advanced_param_exp.xml
++++ b/src/planner/plan_manage/launch/advanced_param_exp.xml
+@@ -85,14 +85,14 @@
+     <param name="fsm/waypoint4_y" value="$(arg point4_y)" type="double"/>
+     <param name="fsm/waypoint4_z" value="$(arg point4_z)" type="double"/>
+ 
+-    <param name="grid_map/resolution"      value="0.15" /> 
++    <param name="grid_map/resolution"      value="0.15" />            <!-- 栅格地图大小  越小越精细但越耗费算力 -->
+     <param name="grid_map/map_size_x"   value="$(arg map_size_x_)" /> 
+     <param name="grid_map/map_size_y"   value="$(arg map_size_y_)" /> 
+     <param name="grid_map/map_size_z"   value="$(arg map_size_z_)" /> 
+     <param name="grid_map/local_update_range_x"  value="5.5" /> 
+     <param name="grid_map/local_update_range_y"  value="5.5" /> 
+     <param name="grid_map/local_update_range_z"  value="4.5" /> 
+-    <param name="grid_map/obstacles_inflation"     value="0.299" /> 
++    <param name="grid_map/obstacles_inflation"     value="0.299" />   <!-- 障碍物膨胀  1.5倍飞机半径 -->
+     <param name="grid_map/local_map_margin" value="10"/>
+     <param name="grid_map/ground_height"        value="-0.01"/>
+     <!-- camera parameter -->
+diff --git a/src/planner/plan_manage/launch/single_run_in_exp.launch b/src/planner/plan_manage/launch/single_run_in_exp.launch
+index e9eec3a..a6e73aa 100644
+--- a/src/planner/plan_manage/launch/single_run_in_exp.launch
++++ b/src/planner/plan_manage/launch/single_run_in_exp.launch
+@@ -2,14 +2,14 @@
+     <!-- number of moving objects -->
+     <arg name="obj_num" value="10" />
+     <arg name="drone_id" value="0"/>
+-
+-    <arg name="map_size_x" value="100"/>
+-    <arg name="map_size_y" value="50"/>
+-    <arg name="map_size_z" value="3.0"/>
+-    <arg name="odom_topic" value="/vins_fusion/imu_propagate"/>
+-    
++    <!-- 地图大小 给的点一定要在尺寸范围内-->  
++    <arg name="map_size_x" value="100"/>         <!-- x启始点是0 所以范围是[-50,50]-->  
++    <arg name="map_size_y" value="50"/>          <!-- y启始点是0 所以范围是[-25,25]--> 
++    <arg name="map_size_z" value="3.0"/>         <!-- z轴范围与advanced_param_exp.xml的"grid_map/ground_height"有关 [-0.01,2.99]--> 
++    <!--<arg name="odom_topic" value="/vins_fusion/imu_propagate"/>-->     <!-- 里程计 -->
++    <arg name="odom_topic" value="/Odometry"/>     <!-- 里程计 -->  
+     <!-- main algorithm params -->
+-    <include file="$(find ego_planner)/launch/advanced_param_exp.xml">
++    <include file="$(find ego_planner)/launch/advanced_param_exp.xml">    <!-- 调用advanced_param_exp.xml --> 
+         <arg name="drone_id" value="$(arg drone_id)"/>
+         <arg name="map_size_x_" value="$(arg map_size_x)"/>
+         <arg name="map_size_y_" value="$(arg map_size_y)"/>
+@@ -23,7 +23,8 @@
+         <arg name="depth_topic" value="/camera/depth/image_rect_raw"/>
+         <!-- topic of point cloud measurement, such as from LIDAR  -->
+         <!-- don't set camera pose and depth, if you already set this one! -->
+-        <arg name="cloud_topic" value="nouse2"/>
++        <!--<arg name="cloud_topic" value="nouse2"/>-->
++        <arg name="cloud_topic" value="cloud_registered"/>
+         <!-- intrinsic params of the depth camera -->
+         <arg name="cx" value="323.3316345214844"/>
+         <arg name="cy" value="234.95498657226562"/>
+@@ -31,7 +32,7 @@
+         <arg name="fy" value="384.39654541015625"/>
+         <!-- maximum velocity and acceleration the drone will reach -->
+         <arg name="max_vel" value="0.5" />
+-        <arg name="max_acc" value="6.0" />
++        <arg name="max_acc" value="2.0" />
+         <!--always set to 1.5 times grater than sensing horizen-->
+         <arg name="planning_horizon" value="6" />
+         <arg name="use_distinctive_trajs" value="false" />
+diff --git a/src/planner/plan_manage/launch/single_run_in_sim.launch b/src/planner/plan_manage/launch/single_run_in_sim.launch
+index 22e44cb..e81f563 100644
+--- a/src/planner/plan_manage/launch/single_run_in_sim.launch
++++ b/src/planner/plan_manage/launch/single_run_in_sim.launch
+@@ -6,8 +6,8 @@
+     <arg name="map_size_x" value="50.0"/>
+     <arg name="map_size_y" value="25.0"/>
+     <arg name="map_size_z" value=" 2.0"/>
+-    <arg name="odom_topic" value="visual_slam/odom" />
+-    
++    <!--<arg name="odom_topic" value="visual_slam/odom" />-->
++    <arg name="odom_topic" value="/Odometry"/>     <!-- 里程计 -->      
+     <!-- map -->
+     <node pkg ="map_generator" name ="random_forest" type ="random_forest" output = "screen">
+         <param name="map/x_size" value="26" />
+diff --git a/src/realflight_modules/VINS-Fusion/config/fast_drone_250.yaml b/src/realflight_modules/VINS-Fusion/config/fast_drone_250.yaml
+index 1989f0a..02f28b4 100644
+--- a/src/realflight_modules/VINS-Fusion/config/fast_drone_250.yaml
++++ b/src/realflight_modules/VINS-Fusion/config/fast_drone_250.yaml
+@@ -13,7 +13,7 @@ image1_topic: "/camera/infra2/image_rect_raw"
+ 
+ 
+ 
+-output_path: "/home/fast-drone/vins_output"
++output_path: "/home/jetson/vins_output"
+ 
+ 
+ cam0_calib: "left.yaml"
+@@ -25,27 +25,46 @@ image_height: 480
+ # Extrinsic parameter between IMU and Camera.
+ estimate_extrinsic: 1   # 0  Have an accurate extrinsic parameters. We will trust the following imu^R_cam, imu^T_cam, don't change it.
+                         # 1  Have an initial guess about extrinsic parameters. We will optimize around your initial guess.
+-
+ body_T_cam0: !!opencv-matrix
+    rows: 4
+    cols: 4
+    dt: d
+-   data: [ -3.0597105734350372e-02, -5.8927835241672222e-03,
+-       9.9951442822153314e-01, 4.7302157421591003e-02,
+-       -9.9953144626651957e-01, -6.5966180705800959e-04,
+-       -3.0601515822914926e-02, 2.2936545354189812e-02,
+-       8.3966960215681175e-04, -9.9998241981978753e-01,
+-       -5.8698386963871307e-03, 6.1639590858913150e-02, 0., 0., 0., 1. ]
++   data: [ 1.1288678891358872e-02, 1.9314295486699492e-02,
++       9.9974973054196947e-01, 2.3660424370954797e-02,
++       -9.9975741098539339e-01, -1.8692228355476459e-02,
++       1.1649883213591007e-02, -6.8628378748054660e-03,
++       1.8912559548389146e-02, -9.9963871403070403e-01,
++       1.9098599487120449e-02, -8.7254382072865580e-02, 0., 0., 0., 1. ]
+ body_T_cam1: !!opencv-matrix
+    rows: 4
+    cols: 4
+    dt: d
+-   data: [ -3.0069515759978405e-02, -5.7183785193312686e-03,
+-       9.9953145241611574e-01, 4.4848038940723180e-02,
+-       -9.9954744323873768e-01, -6.8446400583832556e-04,
+-       -3.0073912680706305e-02, -2.7107742793766636e-02,
+-       8.5611731814771996e-04, -9.9998341569054738e-01,
+-       -5.6952091272581828e-03, 6.1794907739113121e-02, 0., 0., 0., 1. ]
++   data: [ 1.3334440279135107e-02, 2.0519406562703107e-02,
++       9.9970052848678481e-01, 2.7568352413614595e-02,
++       -9.9972964420532484e-01, -1.8772221142855372e-02,
++       1.3720138864399409e-02, -5.6165680510835966e-02,
++       1.9048128504838745e-02, -9.9961320402827725e-01,
++       2.0263541960499398e-02, -8.7318519334719888e-02, 0., 0., 0., 1. ]
++# body_T_cam0: !!opencv-matrix
++#    rows: 4
++#    cols: 4
++#    dt: d
++#    data: [ 1.8025364635532171e-04, 2.0826629472921410e-02,
++#        9.9978308598086452e-01, 5.7971592463930979e-02,
++#        -9.9981069145701529e-01, -1.9448356396918998e-02,
++#        5.8539021468045579e-04, 8.2546984548208125e-03,
++#        1.9456329480865401e-02, -9.9959392402027736e-01,
++#        2.0819181176884416e-02, -7.1109238811695327e-02, 0., 0., 0., 1. ]
++# body_T_cam1: !!opencv-matrix
++#    rows: 4
++#    cols: 4
++#    dt: d
++#    data: [ 1.1739214615169580e-05, 2.1696802517611812e-02,
++#        9.9976459660397210e-01, 5.8606647256575585e-02,
++#        -9.9979726543207126e-01, -2.0130245618077636e-02,
++#        4.4860440147685883e-04, -3.7824987087605906e-02,
++#        2.0135240171003287e-02, -9.9956191502671221e-01,
++#        2.1692167512454064e-02, -6.9616406741233136e-02, 0., 0., 0., 1. ]
+ #Multiple thread support
+ multiple_thread: 1
+ 
+diff --git a/src/realflight_modules/VINS-Fusion/config/left.yaml b/src/realflight_modules/VINS-Fusion/config/left.yaml
+index ceaaa2e..0e2507d 100644
+--- a/src/realflight_modules/VINS-Fusion/config/left.yaml
++++ b/src/realflight_modules/VINS-Fusion/config/left.yaml
+@@ -15,7 +15,7 @@ distortion_parameters:
+ #    cx: 321.42095947265625
+ #    cy: 235.15451049804688
+ projection_parameters:
+-   fx: 384.39654541015625
+-   fy: 384.39654541015625
+-   cx: 323.3316345214844
+-   cy: 234.95498657226562
+\ No newline at end of file
++   fx: 383.6841125488281
++   fy: 383.6841125488281
++   cx: 317.8699035644531
++   cy: 242.15399169921875
+\ No newline at end of file
+diff --git a/src/realflight_modules/VINS-Fusion/config/right.yaml b/src/realflight_modules/VINS-Fusion/config/right.yaml
+index ceaaa2e..0e2507d 100644
+--- a/src/realflight_modules/VINS-Fusion/config/right.yaml
++++ b/src/realflight_modules/VINS-Fusion/config/right.yaml
+@@ -15,7 +15,7 @@ distortion_parameters:
+ #    cx: 321.42095947265625
+ #    cy: 235.15451049804688
+ projection_parameters:
+-   fx: 384.39654541015625
+-   fy: 384.39654541015625
+-   cx: 323.3316345214844
+-   cy: 234.95498657226562
+\ No newline at end of file
++   fx: 383.6841125488281
++   fy: 383.6841125488281
++   cx: 317.8699035644531
++   cy: 242.15399169921875
+\ No newline at end of file
+diff --git a/src/realflight_modules/VINS-Fusion/loop_fusion/CMakeLists.txt b/src/realflight_modules/VINS-Fusion/loop_fusion/CMakeLists.txt
+index bb5ed3a..7faf134 100644
+--- a/src/realflight_modules/VINS-Fusion/loop_fusion/CMakeLists.txt
++++ b/src/realflight_modules/VINS-Fusion/loop_fusion/CMakeLists.txt
+@@ -23,7 +23,7 @@ find_package(Ceres REQUIRED)
+ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+ find_package(Eigen3)
+ 
+-include_directories(${catkin_INCLUDE_DIRS} ${CERES_INCLUDE_DIRS}  ${EIGEN3_INCLUDE_DIR})
++include_directories(${catkin_INCLUDE_DIRS} ${CERES_INCLUDE_DIRS}  ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
+ 
+ catkin_package()
+ 
+@@ -43,4 +43,18 @@ add_executable(loop_fusion_node
+     src/ThirdParty/VocabularyBinary.cpp
+     )
+ 
+-target_link_libraries(loop_fusion_node ${catkin_LIBRARIES}  ${OpenCV_LIBS} ${CERES_LIBRARIES}) 
++target_link_libraries(loop_fusion_node
++    ${catkin_LIBRARIES}
++    ${OpenCV_LIBS}
++    ${CERES_LIBRARIES}
++    # 既然变量是空的，我们就直接告诉它库在哪里！
++    /usr/lib/aarch64-linux-gnu/libopencv_core.so
++    /usr/lib/aarch64-linux-gnu/libopencv_highgui.so
++    /usr/lib/aarch64-linux-gnu/libopencv_imgproc.so
++    /usr/lib/aarch64-linux-gnu/libopencv_imgcodecs.so
++    /usr/lib/aarch64-linux-gnu/libopencv_videoio.so
++    /usr/lib/aarch64-linux-gnu/libopencv_calib3d.so
++    # 下面这两个是 Loop Fusion 特有的，必须加！
++    /usr/lib/aarch64-linux-gnu/libopencv_features2d.so
++    # /usr/lib/aarch64-linux-gnu/libopencv_xfeatures2d.so
++)
+diff --git a/src/realflight_modules/px4ctrl/config/ctrl_param_fpv.yaml b/src/realflight_modules/px4ctrl/config/ctrl_param_fpv.yaml
+index 25d74e9..d23491b 100644
+--- a/src/realflight_modules/px4ctrl/config/ctrl_param_fpv.yaml
++++ b/src/realflight_modules/px4ctrl/config/ctrl_param_fpv.yaml
+@@ -2,7 +2,7 @@
+ # ⭐⭐⭐  Set parameters carefully for satisfied performance!   ⭐⭐⭐ #
+ #########################################################################
+ 
+-mass        : 1.2 # kg 
++mass        : 1.8 # kg 
+ gra         : 9.81 
+ pose_solver : 1     # 0:From ZhepeiWang (drag & less singular) 1:From ZhepeiWang, 2:From rotor-drag    
+ ctrl_freq_max   : 100.0
+@@ -11,28 +11,28 @@ max_manual_vel: 1.0
+ max_angle: 30  # Attitude angle limit in degree. A negative value means no limit.
+ low_voltage: 13.2 # 4S battery
+ 
+-rc_reverse: # *
++rc_reverse: # * #修改通道正反
+     roll: false
+     pitch: false
+     yaw: false
+-    throttle: false
++    throttle: true
+ 
+ auto_takeoff_land:
+     enable: true
+     enable_auto_arm: true
+-    no_RC: false
+-    takeoff_height: 1.0 # m
+-    takeoff_land_speed: 0.3 # m/s
++    no_RC: true   # 全自动无遥控器
++    takeoff_height: 1.0 # m   #悬停高度
++    takeoff_land_speed: 0.3 # m/s  #自动起飞的速度
+ 
+ thrust_model: # The model that maps thrust signal u(0~1) to real thrust force F(Unit:N): F=K1*Voltage^K2*(K3*u^2+(1-K3)*u). 
+-    print_value: false # display the value of “thr_scale_compensate” or “hover_percentage” during thrust model estimating.
++    print_value: true # display the value of “thr_scale_compensate” or “hover_percentage” during thrust model estimating.
+     accurate_thrust_model: false  # This can always enabled if don't require accurate control performance :-)
+     # accurate thrust mapping parameters
+     K1: 0.7583 # Needs precise calibration!
+     K2: 1.6942 # Needs precise calibration!
+     K3: 0.6786 # Needs precise calibration! K3 equals THR_MDL_FAC in https://docs.px4.io/master/en/config_mc/pid_tuning_guide_multicopter.html.
+     # approximate thrust mapping parameters
+-    hover_percentage: 0.30  # Thrust percentage in Stabilize/Arco mode # *
++    hover_percentage: 0.75  # Thrust percentage in Stabilize/Arco mode # *
+ 
+ gain: 
+     # Cascade PID controller. Recommend to read the code.
+diff --git a/src/realflight_modules/px4ctrl/launch/run_ctrl.launch b/src/realflight_modules/px4ctrl/launch/run_ctrl.launch
+index a0f0f2c..78639c0 100644
+--- a/src/realflight_modules/px4ctrl/launch/run_ctrl.launch
++++ b/src/realflight_modules/px4ctrl/launch/run_ctrl.launch
+@@ -1,9 +1,10 @@
+ <launch>
++	<arg name="odom_topic" default="/Odometry_highrate" />
+ 
+ 	<node pkg="px4ctrl" type="px4ctrl_node" name="px4ctrl" output="screen">
+         	<!-- <remap from="~odom" to="/vicon_imu_ekf_odom" /> -->
+-			
+-			<remap from="~odom" to="/vins_fusion/imu_propagate" />
++		<!-- For FAST-LIO based flight control, use the IMU-propageted high-rate odom. Override odom_topic if you switch back to raw FAST-LIO or VINS. -->
++		<remap from="~odom" to="$(arg odom_topic)" />
+ 
+ 		<remap from="~cmd" to="/position_cmd" />
+ 

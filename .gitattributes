@@ -1,0 +1,11 @@
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.launch text
+*.xml text
+*.yaml text
+*.json text
+*.gif binary
+*.mp4 binary
+*.xlsx binary
+*.rviz text
