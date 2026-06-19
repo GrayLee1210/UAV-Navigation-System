@@ -1,0 +1,86 @@
+<launch>
+  <!-- ============================================================= -->
+  <!-- FUEL real-flight exploration: DLIO odom + registered cloud.   -->
+  <!--   pose input : DLIO  (drop-in replacement of ego-planner)     -->
+  <!--   plan       : FUEL exploration_node                          -->
+  <!--   output     : /position_cmd -> px4ctrl -> mavros -> FCU      -->
+  <!-- NO simulator. NO startup takeoff wiggle (sim_takeoff=false).  -->
+  <!-- ============================================================= -->
+
+  <!-- size of the global map (odom/world frame, drone boots at 0,0,0) -->
+  <arg name="map_size_x" value="40.0"/>
+  <arg name="map_size_y" value="40.0"/>
+  <arg name="map_size_z" value="5.0"/>
+
+  <!-- only used as initial hover defaults; not published (wiggle disabled) -->
+  <arg name="init_x" value="0"/>
+  <arg name="init_y" value="0"/>
+  <arg name="init_z" value="1.0"/>
+
+  <!-- DLIO odometry (relayed from /Odometry_highrate by t4_relay) -->
+  <arg name="odom_topic" value="/Odometry" />
+
+  <!-- main algorithm params -->
+  <include file="$(find exploration_manager)/launch/algorithm.xml">
+
+    <arg name="map_size_x_" value="$(arg map_size_x)"/>
+    <arg name="map_size_y_" value="$(arg map_size_y)"/>
+    <arg name="map_size_z_" value="$(arg map_size_z)"/>
+
+    <!-- ===== EXPLORATION BOUNDING BOX (odom frame) — TUNE TO YOUR ROOM ===== -->
+    <!-- Drone starts at (0,0,0). Keep this strictly inside the safe volume. -->
+    <arg name="box_min_x" value="-10.0"/>
+    <arg name="box_min_y" value="-10.0"/>
+    <arg name="box_min_z" value=" 0.8"/>
+    <arg name="box_max_x" value=" 10.0"/>
+    <arg name="box_max_y" value=" 10.0"/>
+    <arg name="box_max_z" value=" 1.8"/>
+
+    <arg name="odometry_topic" value="$(arg odom_topic)"/>
+
+    <!-- DLIO sensor pose (PoseStamped), time-synced with the cloud -->
+    <arg name="sensor_pose_topic" value="/robot/dlio/odom_node/pose"/>
+
+    <!-- world-frame registered cloud from DLIO -->
+    <arg name="cloud_topic" value="/cloud_registered"/>
+    <!-- depth unused (cloud path); point to a topic with no publisher -->
+    <arg name="depth_topic" value="/fuel_unused_depth"/>
+
+    <!-- depth intrinsics (unused with cloud input) -->
+    <arg name="cx" value="321.04638671875"/>
+    <arg name="cy" value="243.44969177246094"/>
+    <arg name="fx" value="387.229248046875"/>
+    <arg name="fy" value="387.229248046875"/>
+
+    <!-- conservative limits for first real flight -->
+    <arg name="max_vel" value="1.0" />
+    <arg name="max_acc" value="0.5" />
+  </include>
+
+  <!-- trajectory server: publishes /position_cmd consumed by px4ctrl -->
+  <node pkg="plan_manage" name="traj_server" type="traj_server" output="screen">
+    <!-- NOTE: do NOT remap /position_cmd here (px4ctrl ~cmd -> /position_cmd) -->
+    <remap from="/odom_world" to="$(arg odom_topic)"/>
+    <param name="traj_server/time_forward" value="1.5" type="double"/>
+    <param name="traj_server/pub_traj_id" value="4" type="int"/>
+    <param name="traj_server/init_x" value="$(arg init_x)" type="double"/>
+    <param name="traj_server/init_y" value="$(arg init_y)" type="double"/>
+    <param name="traj_server/init_z" value="$(arg init_z)" type="double"/>
+    <param name="traj_server/sim_takeoff" value="false" type="bool"/>
+
+    <param name="perception_utils/top_angle" value="0.56125" type="double"/>
+    <param name="perception_utils/left_angle" value="0.69222" type="double"/>
+    <param name="perception_utils/right_angle" value="0.68901" type="double"/>
+    <param name="perception_utils/max_dist" value="4.5" type="double"/>
+    <param name="perception_utils/vis_dist" value="1.0" type="double"/>
+  </node>
+
+  <!-- trigger: a single 2D Nav Goal in RViz -> /waypoint_generator/waypoints -->
+  <node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
+    <remap from="~odom" to="$(arg odom_topic)"/>
+    <remap from="~goal" to="/move_base_simple/goal"/>
+    <remap from="~traj_start_trigger" to="/traj_start_trigger" />
+    <param name="waypoint_type" value="point"/>
+  </node>
+
+</launch>

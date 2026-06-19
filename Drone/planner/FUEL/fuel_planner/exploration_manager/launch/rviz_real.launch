@@ -1,0 +1,10 @@
+<launch>
+  <!-- Real-flight FUEL visualization.
+       DLIO publishes everything in frame "robot/odom"; FUEL markers use "world".
+       They are numerically the same frame, so bridge them with an identity TF. -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_dlio_odom"
+        args="0 0 0 0 0 0 world robot/odom" />
+
+  <node name="fuel_rviz" pkg="rviz" type="rviz"
+        args="-d $(find plan_manage)/config/traj_real.rviz" output="log" />
+</launch>
