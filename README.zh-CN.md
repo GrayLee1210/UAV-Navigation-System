@@ -65,11 +65,12 @@ graph LR
     D --> M[MAVROS] --> G[PX4 / Pixhawk 4]
 ```
 
-同一套激光-惯性定位前端可对接两种可互换的规划器:
+整套系统按角色分层,每一层都是独立的 catkin 工作空间:
 
 - **定位**(`Drone/localization/`)— FAST-LIO2 或 DLIO,均发布 `/Odometry` + `/Odometry_highrate` + `/cloud_registered`。
-- **EGO-Planner**(`Drone/planner/ego_planner/`)— 点到点 / 航点导航。用 `scripts/run_fastlio_ego_px4.sh` 或 `scripts/run_dlio_ego_px4.sh` 启动。
-- **FUEL**(`Drone/planner/FUEL/`)— 未知环境下基于 frontier 的自主探索。
+- **规划**(`Drone/planner/`)— `ego_planner`(点到点 / 航点导航)与 `FUEL`(基于 frontier 的自主探索)。用 `scripts/run_fastlio_ego_px4.sh` / `scripts/run_dlio_ego_px4.sh` 启动。
+- **控制**(`Drone/control/`)— `px4ctrl`(+ `uav_utils`、`quadrotor_msgs`、`cmake_utils`),通过 MAVROS 把位置指令桥接到 PX4(MAVROS 本身走 apt 安装)。
+- **VIO**(`Drone/vio/`)— VINS-Fusion,可选的视觉-惯性前端(激光飞行栈不使用,保留供后续视觉工作)。
 
 ### 相对上游的关键修改
 
@@ -79,9 +80,11 @@ graph LR
 | **DLIO**(`Drone/localization/dlio_ws`) | [vectr-ucla/direct_lidar_inertial_odometry](https://github.com/vectr-ucla/direct_lidar_inertial_odometry) `fc8d183` | ① 新增 `imu/accelScale` 参数 — Mid-360 的 IMU 加速度输出单位是 **g** 而非 m/s²,按 9.80665 换算。② `cfg/dlio.yaml` 写入 Mid-360 外参(与 FAST-LIO2 的 `mid360.yaml` 对齐)。③ 新增 `launch/dlio_mid360_drone.launch`,把 DLIO 输出重映射为 `/Odometry_highrate` + `/cloud_registered`,实现对 FAST-LIO2 的即插即用替换。 |
 | **EGO-Planner**(`Drone/planner/ego_planner`,来自 [Fast-Drone-250](https://github.com/ZJU-FAST-Lab/Fast-Drone-250) `8ff6427`) | launch/配置 | ① 里程计源从 VINS-Fusion(`/vins_fusion/imu_propagate`)切换为 LIO(`/Odometry`)。② `grid_map` 直接由激光注册点云(`cloud_registered`)构建,不再依赖深度相机。③ `max_acc` 从 6.0 降到 2.0,保证室内飞行安全。完整 diff 见 `patches/`。 |
 | **FUEL**(`Drone/planner/FUEL`) | [HKUST-Aerial-Robotics/FUEL](https://github.com/HKUST-Aerial-Robotics/FUEL) `662dd23` | 在实机上复现 frontier 自主探索:以 Mid-360 激光点云 + LIO 里程计为输入,通过 `exploration_real.launch` 驱动探索。已在真实室内走廊复现并验证(见演示)。 |
+| **px4ctrl**(`Drone/control/px4ctrl`,来自 [Fast-Drone-250](https://github.com/ZJU-FAST-Lab/Fast-Drone-250) `8ff6427`) | launch/配置 | 到 PX4 的位置控制桥接,输入 `/Odometry_highrate`;`run_ctrl.launch` + `ctrl_param_fpv.yaml` 针对 250mm 平台调参。随附依赖 `uav_utils`、`quadrotor_msgs`、`cmake_utils`。 |
+| **VINS-Fusion**(`Drone/vio/VINS-Fusion`) | [HKUST-Aerial-Robotics/VINS-Fusion](https://github.com/HKUST-Aerial-Robotics/VINS-Fusion) | 修复 `loop_fusion` 的 OpenCV 4.2/4.5 链接冲突(见 `patches/vins_loop_fusion_opencv4.2_fix.patch` 与 `Drone/vio/README.md`)。可选 VIO 前端,激光飞行栈不使用。 |
 | **livox_ros_driver2** | [Livox-SDK/livox_ros_driver2](https://github.com/Livox-SDK/livox_ros_driver2) `6b9356c` | **不收录源码** — 直接使用上游。唯一差异是网络配置:见 `config/livox/MID360_config.json`(主机 `192.168.1.50`,雷达 `192.168.1.154`)。 |
 
-> `patches/` 内含定位 / EGO-Planner 各模块相对其锁定上游 commit 的精确 diff,便于审阅与重新应用。
+> `patches/` 内含各修改模块相对其锁定上游 commit 的精确 diff,便于审阅与重新应用。
 
 ## 📂 仓库结构
 
@@ -95,12 +98,12 @@ graph LR
 │   ├── localization/
 │   │   ├── fast_lio2_ws/             # 修改版 FAST-LIO2(高频里程计、driver2 移植)
 │   │   └── dlio_ws/                  # 修改版 DLIO(accelScale、Mid-360 launch)
-│   └── planner/
-│       ├── ego_planner/              # 从 Fast-Drone-250 提取的 EGO-Planner(航点导航)
-│       └── FUEL/                     # FUEL 基于 frontier 的自主探索
-├── config/
-│   ├── livox/                        # Mid-360 网络配置(livox_ros_driver2)
-│   └── px4ctrl/                      # px4ctrl 控制参数 + launch
+│   ├── planner/
+│   │   ├── ego_planner/              # 从 Fast-Drone-250 提取的 EGO-Planner(航点导航)
+│   │   └── FUEL/                     # FUEL 基于 frontier 的自主探索
+│   ├── control/                      # px4ctrl + uav_utils + quadrotor_msgs + cmake_utils
+│   └── vio/                          # VINS-Fusion(可选 VIO;loop_fusion OpenCV 修复)
+├── config/livox/                     # Mid-360 网络配置(livox_ros_driver2)
 ├── patches/                          # 相对上游锁定 commit 的 diff
 └── scripts/                          # 一键启动 / 起飞 / 录包脚本
 ```
@@ -111,11 +114,11 @@ graph LR
 # 1. 编译 Livox 驱动(上游源码)并替换本仓库的网络配置
 #    livox_ws/src/livox_ros_driver2  @ 6b9356c,替换 config/MID360_config.json
 
-# 2. 用本仓库源码编译两个定位工作空间
-#    Drone/localization/fast_lio2_ws   (catkin build)
-#    Drone/localization/dlio_ws        (catkin build)
+# 2. 用本仓库源码编译各工作空间(每个都是独立的 catkin_make 工作空间)
+#    Drone/localization/fast_lio2_ws   Drone/localization/dlio_ws
+#    Drone/control     (px4ctrl + 依赖)    Drone/planner/ego_planner   Drone/planner/FUEL
 
-# 3a. 航点导航:编译 Drone/planner/ego_planner,然后一键启动整套系统
+# 3a. 航点导航:一键启动整套系统(LIO + relay + MAVROS + px4ctrl + EGO-Planner)
 ./scripts/run_fastlio_ego_px4.sh    # FAST-LIO2 + EGO-Planner 流水线
 ./scripts/run_dlio_ego_px4.sh       # 或:DLIO + EGO-Planner 流水线
 

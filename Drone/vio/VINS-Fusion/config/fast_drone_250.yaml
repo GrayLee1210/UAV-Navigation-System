@@ -1,0 +1,99 @@
+%YAML:1.0
+
+#common parameters
+#support: 1 imu 1 cam; 1 imu 2 cam: 2 cam; 
+imu: 1         
+num_of_cam: 2
+
+
+imu_topic: "/mavros/imu/data_raw"
+image0_topic: "/camera/infra1/image_rect_raw"
+image1_topic: "/camera/infra2/image_rect_raw"
+
+
+
+
+output_path: "/home/jetson/vins_output"
+
+
+cam0_calib: "left.yaml"
+cam1_calib: "right.yaml"
+image_width: 640
+image_height: 480
+   
+
+# Extrinsic parameter between IMU and Camera.
+estimate_extrinsic: 1   # 0  Have an accurate extrinsic parameters. We will trust the following imu^R_cam, imu^T_cam, don't change it.
+                        # 1  Have an initial guess about extrinsic parameters. We will optimize around your initial guess.
+body_T_cam0: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data: [ 1.1288678891358872e-02, 1.9314295486699492e-02,
+       9.9974973054196947e-01, 2.3660424370954797e-02,
+       -9.9975741098539339e-01, -1.8692228355476459e-02,
+       1.1649883213591007e-02, -6.8628378748054660e-03,
+       1.8912559548389146e-02, -9.9963871403070403e-01,
+       1.9098599487120449e-02, -8.7254382072865580e-02, 0., 0., 0., 1. ]
+body_T_cam1: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: d
+   data: [ 1.3334440279135107e-02, 2.0519406562703107e-02,
+       9.9970052848678481e-01, 2.7568352413614595e-02,
+       -9.9972964420532484e-01, -1.8772221142855372e-02,
+       1.3720138864399409e-02, -5.6165680510835966e-02,
+       1.9048128504838745e-02, -9.9961320402827725e-01,
+       2.0263541960499398e-02, -8.7318519334719888e-02, 0., 0., 0., 1. ]
+# body_T_cam0: !!opencv-matrix
+#    rows: 4
+#    cols: 4
+#    dt: d
+#    data: [ 1.8025364635532171e-04, 2.0826629472921410e-02,
+#        9.9978308598086452e-01, 5.7971592463930979e-02,
+#        -9.9981069145701529e-01, -1.9448356396918998e-02,
+#        5.8539021468045579e-04, 8.2546984548208125e-03,
+#        1.9456329480865401e-02, -9.9959392402027736e-01,
+#        2.0819181176884416e-02, -7.1109238811695327e-02, 0., 0., 0., 1. ]
+# body_T_cam1: !!opencv-matrix
+#    rows: 4
+#    cols: 4
+#    dt: d
+#    data: [ 1.1739214615169580e-05, 2.1696802517611812e-02,
+#        9.9976459660397210e-01, 5.8606647256575585e-02,
+#        -9.9979726543207126e-01, -2.0130245618077636e-02,
+#        4.4860440147685883e-04, -3.7824987087605906e-02,
+#        2.0135240171003287e-02, -9.9956191502671221e-01,
+#        2.1692167512454064e-02, -6.9616406741233136e-02, 0., 0., 0., 1. ]
+#Multiple thread support
+multiple_thread: 1
+
+#feature traker paprameters
+max_cnt: 150            # max feature number in feature tracking
+min_dist: 30            # min distance between two features 
+freq: 10                # frequence (Hz) of publish tracking result. At least 10Hz for good estimation. If set 0, the frequence will be same as raw image 
+F_threshold: 1.0        # ransac threshold (pixel)
+show_track: 1           # publish tracking image as topic
+flow_back: 1            # perform forward and backward optical flow to improve feature tracking accuracy
+
+#optimization parameters
+max_solver_time: 0.04  # max solver itration time (ms), to guarantee real time
+max_num_iterations: 8   # max solver itrations, to guarantee real time
+keyframe_parallax: 10.0 # keyframe selection threshold (pixel)
+
+#imu parameters       The more accurate parameters you provide, the better performance
+acc_n: 0.1          # accelerometer measurement noise standard deviation. #0.2   0.04
+gyr_n: 0.01         # gyroscope measurement noise standard deviation.     #0.05  0.004
+acc_w: 0.001         # accelerometer bias random work noise standard deviation.  #0.002
+gyr_w: 0.0001       # gyroscope bias random work noise standard deviation.     #4.0e-5
+g_norm: 9.805         # gravity magnitude
+
+#unsynchronization parameters
+estimate_td: 1                      # online estimate time offset between camera and imu
+td: -0.05                             # initial value of time offset. unit: s. readed image clock + td = real image clock (IMU clock)
+
+#loop closure parameters
+load_previous_pose_graph: 0        # load and reuse previous pose graph; load from 'pose_graph_save_path'
+pose_graph_save_path: "/home/fast/savedfiles/output/pose_graph/" # save and load path
+save_image: 1                   # save image in pose graph for visualization prupose; you can close this function by setting 0 
+

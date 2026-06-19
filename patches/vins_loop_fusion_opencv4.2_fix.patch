@@ -1,0 +1,33 @@
+--- a/Drone/vio/VINS-Fusion/loop_fusion/CMakeLists.txt
++++ b/Drone/vio/VINS-Fusion/loop_fusion/CMakeLists.txt
+@@ -23,7 +23,7 @@
+ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+ find_package(Eigen3)
+ 
+-include_directories(${catkin_INCLUDE_DIRS} ${CERES_INCLUDE_DIRS}  ${EIGEN3_INCLUDE_DIR} ${OpenCV_INCLUDE_DIRS})
++include_directories(${OpenCV_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS} ${CERES_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR})
+ 
+ catkin_package()
+ 
+@@ -48,13 +48,13 @@
+     ${OpenCV_LIBS}
+     ${CERES_LIBRARIES}
+     # 既然变量是空的，我们就直接告诉它库在哪里！
+-    /usr/lib/aarch64-linux-gnu/libopencv_core.so
+-    /usr/lib/aarch64-linux-gnu/libopencv_highgui.so
+-    /usr/lib/aarch64-linux-gnu/libopencv_imgproc.so
+-    /usr/lib/aarch64-linux-gnu/libopencv_imgcodecs.so
+-    /usr/lib/aarch64-linux-gnu/libopencv_videoio.so
+-    /usr/lib/aarch64-linux-gnu/libopencv_calib3d.so
++    /usr/local/lib/libopencv_core.so
++    /usr/local/lib/libopencv_highgui.so
++    /usr/local/lib/libopencv_imgproc.so
++    /usr/local/lib/libopencv_imgcodecs.so
++    /usr/local/lib/libopencv_videoio.so
++    /usr/local/lib/libopencv_calib3d.so
+     # 下面这两个是 Loop Fusion 特有的，必须加！
+-    /usr/lib/aarch64-linux-gnu/libopencv_features2d.so
+-    # /usr/lib/aarch64-linux-gnu/libopencv_xfeatures2d.so
++    /usr/local/lib/libopencv_features2d.so
++    # /usr/local/lib/libopencv_xfeatures2d.so
+ )

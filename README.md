@@ -65,11 +65,12 @@ graph LR
     D --> M[MAVROS] --> G[PX4 / Pixhawk 4]
 ```
 
-The same LiDAR-inertial localization front-end feeds two interchangeable planners:
+The stack is organized by role — each layer is an independent catkin workspace:
 
 - **Localization** (`Drone/localization/`) — FAST-LIO2 or DLIO, both publishing `/Odometry` + `/Odometry_highrate` + `/cloud_registered`.
-- **EGO-Planner** (`Drone/planner/ego_planner/`) — point-to-point / waypoint navigation. Start with `scripts/run_fastlio_ego_px4.sh` or `scripts/run_dlio_ego_px4.sh`.
-- **FUEL** (`Drone/planner/FUEL/`) — frontier-based autonomous exploration of unknown environments.
+- **Planner** (`Drone/planner/`) — `ego_planner` (point-to-point / waypoint navigation) and `FUEL` (frontier-based autonomous exploration). Start with `scripts/run_fastlio_ego_px4.sh` / `scripts/run_dlio_ego_px4.sh`.
+- **Control** (`Drone/control/`) — `px4ctrl` (+ `uav_utils`, `quadrotor_msgs`, `cmake_utils`) bridging position commands to PX4 via MAVROS (MAVROS itself is apt-installed).
+- **VIO** (`Drone/vio/`) — VINS-Fusion, optional visual-inertial front-end (not used by the LiDAR flight stack; kept for future vision work).
 
 ### Key Modifications vs. Upstream
 
@@ -79,9 +80,11 @@ The same LiDAR-inertial localization front-end feeds two interchangeable planner
 | **DLIO** (`Drone/localization/dlio_ws`) | [vectr-ucla/direct_lidar_inertial_odometry](https://github.com/vectr-ucla/direct_lidar_inertial_odometry) `fc8d183` | ① New `imu/accelScale` parameter — the Mid-360 IMU reports acceleration in **g**, not m/s², so it is rescaled by 9.80665. ② Mid-360 extrinsics in `cfg/dlio.yaml` (aligned with FAST-LIO2's `mid360.yaml`). ③ New `launch/dlio_mid360_drone.launch` remaps DLIO outputs to `/Odometry_highrate` + `/cloud_registered`, making DLIO a drop-in replacement for FAST-LIO2 in the same stack. |
 | **EGO-Planner** (`Drone/planner/ego_planner`, from [Fast-Drone-250](https://github.com/ZJU-FAST-Lab/Fast-Drone-250) `8ff6427`) | launch/config | ① Odometry source switched from VINS-Fusion (`/vins_fusion/imu_propagate`) to LIO (`/Odometry`). ② `grid_map` is built directly from the LiDAR registered cloud (`cloud_registered`) instead of the depth camera. ③ `max_acc` lowered 6.0 → 2.0 for safe indoor flight. Full diff in `patches/`. |
 | **FUEL** (`Drone/planner/FUEL`) | [HKUST-Aerial-Robotics/FUEL](https://github.com/HKUST-Aerial-Robotics/FUEL) `662dd23` | Frontier-based autonomous exploration reproduced on the real platform: takes the Mid-360 LiDAR cloud + LIO odometry as input and drives exploration through `exploration_real.launch`. Reproduced and verified in a real indoor corridor (see demo). |
+| **px4ctrl** (`Drone/control/px4ctrl`, from [Fast-Drone-250](https://github.com/ZJU-FAST-Lab/Fast-Drone-250) `8ff6427`) | launch/config | Position-control bridge to PX4. Driven by `/Odometry_highrate`; `run_ctrl.launch` + `ctrl_param_fpv.yaml` tuned for the 250mm platform. Shipped with its deps `uav_utils`, `quadrotor_msgs`, `cmake_utils`. |
+| **VINS-Fusion** (`Drone/vio/VINS-Fusion`) | [HKUST-Aerial-Robotics/VINS-Fusion](https://github.com/HKUST-Aerial-Robotics/VINS-Fusion) | `loop_fusion` OpenCV-4.2/4.5 link fix (see `patches/vins_loop_fusion_opencv4.2_fix.patch` and `Drone/vio/README.md`). Optional VIO front-end, not used by the LiDAR flight stack. |
 | **livox_ros_driver2** | [Livox-SDK/livox_ros_driver2](https://github.com/Livox-SDK/livox_ros_driver2) `6b9356c` | **Not vendored** — use upstream directly. Only the network config differs: see `config/livox/MID360_config.json` (host `192.168.1.50`, LiDAR `192.168.1.154`). |
 
-> `patches/` contains the exact diffs of the localization / EGO-Planner modules against their pinned upstream commits, for review and re-application.
+> `patches/` contains the exact diffs of the modified modules against their pinned upstream commits, for review and re-application.
 
 ## 📂 Repository Structure
 
@@ -95,12 +98,12 @@ The same LiDAR-inertial localization front-end feeds two interchangeable planner
 │   ├── localization/
 │   │   ├── fast_lio2_ws/             # Modified FAST-LIO2 (high-rate odom, driver2 port)
 │   │   └── dlio_ws/                  # Modified DLIO (accelScale, Mid-360 launch)
-│   └── planner/
-│       ├── ego_planner/              # EGO-Planner extracted from Fast-Drone-250 (waypoint nav)
-│       └── FUEL/                     # FUEL frontier-based autonomous exploration
-├── config/
-│   ├── livox/                        # Mid-360 network config for livox_ros_driver2
-│   └── px4ctrl/                      # px4ctrl control params + launch
+│   ├── planner/
+│   │   ├── ego_planner/              # EGO-Planner extracted from Fast-Drone-250 (waypoint nav)
+│   │   └── FUEL/                     # FUEL frontier-based autonomous exploration
+│   ├── control/                      # px4ctrl + uav_utils + quadrotor_msgs + cmake_utils
+│   └── vio/                          # VINS-Fusion (optional VIO; loop_fusion OpenCV fix)
+├── config/livox/                     # Mid-360 network config for livox_ros_driver2
 ├── patches/                          # Diffs vs. pinned upstream commits
 └── scripts/                          # One-shot startup / takeoff / record scripts
 ```
@@ -111,11 +114,11 @@ The same LiDAR-inertial localization front-end feeds two interchangeable planner
 # 1. Build the Livox driver (upstream) with the config from this repo
 #    livox_ws/src/livox_ros_driver2  @ 6b9356c, replace config/MID360_config.json
 
-# 2. Build the localization workspaces from this repo's sources
-#    Drone/localization/fast_lio2_ws   (catkin build)
-#    Drone/localization/dlio_ws        (catkin build)
+# 2. Build the workspaces from this repo's sources (each is an independent catkin_make ws)
+#    Drone/localization/fast_lio2_ws   Drone/localization/dlio_ws
+#    Drone/control      (px4ctrl + deps)   Drone/planner/ego_planner   Drone/planner/FUEL
 
-# 3a. Waypoint navigation: build Drone/planner/ego_planner, then launch the full stack
+# 3a. Waypoint navigation: launch the full stack (LIO + relay + MAVROS + px4ctrl + EGO-Planner)
 ./scripts/run_fastlio_ego_px4.sh    # FAST-LIO2 + EGO-Planner pipeline
 ./scripts/run_dlio_ego_px4.sh       # or: DLIO + EGO-Planner pipeline
 
